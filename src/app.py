@@ -2,45 +2,33 @@
 This module takes care of starting the API Server, Loading the DB and Adding the endpoints
 """
 import os
-from flask import Flask, request, jsonify, url_for, send_from_directory
+from flask import Flask, request, jsonify, url_for
 from flask_migrate import Migrate
 from flask_swagger import swagger
 from flask_cors import CORS
-from api.utils import APIException, generate_sitemap
-from api.models import db
-from api.routes import api
-from api.admin import setup_admin
-from api.commands import setup_commands
+from utils import APIException, generate_sitemap
+from admin import setup_admin
+from models import db, User
+import requests
+import json
 
+#print(response_API.status_code)
 #from models import Person
 
-ENV = os.getenv("FLASK_ENV")
-static_file_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), '../public/')
 app = Flask(__name__)
 app.url_map.strict_slashes = False
 
-# database condiguration
 db_url = os.getenv("DATABASE_URL")
 if db_url is not None:
     app.config['SQLALCHEMY_DATABASE_URI'] = db_url.replace("postgres://", "postgresql://")
 else:
     app.config['SQLALCHEMY_DATABASE_URI'] = "sqlite:////tmp/test.db"
-
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-MIGRATE = Migrate(app, db, compare_type = True)
+
+MIGRATE = Migrate(app, db)
 db.init_app(app)
-
-# Allow CORS requests to this API
 CORS(app)
-
-# add the admin
 setup_admin(app)
-
-# add the admin
-setup_commands(app)
-
-# Add all endpoints form the API with a "api" prefix
-app.register_blueprint(api, url_prefix='/api')
 
 # Handle/serialize errors like a JSON object
 @app.errorhandler(APIException)
@@ -50,21 +38,95 @@ def handle_invalid_usage(error):
 # generate sitemap with all your endpoints
 @app.route('/')
 def sitemap():
-    if ENV == "development":
-        return generate_sitemap(app)
-    return send_from_directory(static_file_dir, 'index.html')
+    return generate_sitemap(app)
 
-# any other endpoint will try to serve it like a static file
-@app.route('/<path:path>', methods=['GET'])
-def serve_any_other_file(path):
-    if not os.path.isfile(os.path.join(static_file_dir, path)):
-        path = 'index.html'
-    response = send_from_directory(static_file_dir, path)
-    response.cache_control.max_age = 0 # avoid cache memory
-    return response
+# @app.route('/user', methods=['GET'])
+# def handle_hello():
+
+#     response_body = {
+#         "msg": "Hello, this is your GET /user response "
+#     }
+
+#     return jsonify(response_body), 200
+
+@app.route('/people', methods=['GET'])
+def get_all_people():
+    response_API = requests.get('https://swapi.dev/api/people')
+    print(response_API.text)
+
+    # response_body = {
+    #     "msg": "Hello, this is your GET /user response "
+    # }
+
+    return response_API.json()["results"], 200
+    response_API.status_code != 200
+    return "", 404
+
+@app.route('/planets', methods=['GET'])
+def get_all_planets():
+    response_API = requests.get('https://swapi.dev/api/planets/')
+    print(response_API.text)
+
+    return (response_API.json()), 200
+ 
+@app.route('/people/<people_id>', methods=['GET'])
+def get_people(people_id):
+    response_API = requests.get('https://swapi.dev/api/people/'+ people_id)
+    print(response_API.text)
+
+    return (response_API.json()), 200
+ 
+
+@app.route('/planets/<planet_id>', methods=['GET'])
+def get_planet(planet_id):
+    response_API = requests.get('https://swapi.dev/api/planets/'+ planet_id)
+    print(response_API.text)
+
+    return (response_API.json()), 200
 
 
-# this only runs if `$ python src/main.py` is executed
+
+#From DB -- models.py file
+@app.route('/users', methods=['GET'])
+def get_all_users():
+
+    users_query = User.query.all()
+    all_users = list(map(lambda x: x.serialize(), users_query))
+    print(all_users)
+    return all_users, 200
+
+
+@app.route('/favorite/planet/<planet_id>/<user_id>', methods=['POST'])
+def get_all_favorites(planet_id, user_id):
+    
+    user1 = User.query.get(user_id)
+    if user1 is None:
+        
+        user1 = User(id= user_id, favorite_planets=json.dumps([planet_id]), favorite_people=json.dumps([]))
+        db.session.add(user1)
+        db.session.commit()
+        return "ok", 200
+
+    fav_planets = json.loads(user1.favorite_planets) # change str to list
+    fav_planets.append(planet_id)
+    user1.favourite_planets = json.dumps(fav_planets) #list to str
+    db.session.commit()
+    return "planet added", 200
+
+@app.route('/favorite/planet/<planet_id>/<user_id>', methods=['DELETE'])
+def delete_favorites(planet_id, user_id):
+    user1 = User.query.get(user_id)
+    if user1 is None:
+        return "Does not exist", 200
+
+    fav_planets = json.loads(user1.favorite_planets) # change str to list
+    fav_planets.remove(planet_id)
+    user1.favourite_planets = json.dumps(fav_planets) #list to str
+    db.session.commit()
+    return "planet removed", 200
+
+
+# this only runs if `$ python src/app.py` is executed
 if __name__ == '__main__':
-    PORT = int(os.environ.get('PORT', 3001))
-    app.run(host='0.0.0.0', port=PORT, debug=True)
+    PORT = int(os.environ.get('PORT', 3000))
+    app.run(host='0.0.0.0', port=PORT, debug=False)
